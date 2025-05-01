@@ -1,0 +1,5 @@
+{
+    "codium.enterprise.onPremService.enable": true,
+    "codium.codeCompletion.enable": true,
+    "python.analysis.autoImportCompletions": true
+}
