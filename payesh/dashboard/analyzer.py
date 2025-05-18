@@ -13,25 +13,22 @@ warnings.filterwarnings('ignore')
 class InteractiveDataAnalyzer:
     """
     A class to perform interactive data analysis and visualization
-    using pandas and plotly.
+    using pandas and plotly. Simpler version with outlier plotting.
     """
     def __init__(self, df):
         if not isinstance(df, pd.DataFrame):
             raise TypeError("Input must be a pandas DataFrame.")
-        # Work on a copy to avoid modifying original data outside the class methods explicitly designed for transformation
+        # Work on a copy
         self._df = df.copy()
-        # Convert potential object columns that are dates/numbers but not detected
+        # Attempt to convert potential object columns that are dates/numbers
         for col in self._df.columns:
              try:
-                  # Attempt to convert to numeric first, coercing errors to NaN
-                  # Ensure the column is hashable if it's going to be used in groupby later
                   self._df[col] = pd.to_numeric(self._df[col], errors='coerce')
              except:
-                  # If numeric conversion fails, try datetime
                   try:
                        self._df[col] = pd.to_datetime(self._df[col], errors='coerce')
                   except:
-                       # If neither, try converting non-numeric objects to string for consistency in grouping/filtering
+                       # Convert remaining object columns to string for consistency in plotting/display
                        if pd.api.types.is_object_dtype(self._df[col]) or pd.api.types.is_categorical_dtype(self._df[col]):
                             self._df[col] = self._df[col].astype(str)
                        pass # Keep as is if conversion fails
@@ -47,13 +44,11 @@ class InteractiveDataAnalyzer:
 
     def get_numeric_columns(self):
         """Returns a list of numeric column names."""
-        # Use pandas type checking which is more robust
         numeric_cols = [col for col in self._df.columns if pd.api.types.is_numeric_dtype(self._df[col])]
         return numeric_cols
 
     def get_categorical_columns(self):
         """Returns a list of categorical (object/string/bool) column names."""
-        # Check for object, category, or boolean dtypes
         categorical_cols = [col for col in self._df.columns if pd.api.types.is_object_dtype(self._df[col]) or pd.api.types.is_categorical_dtype(self._df[col]) or pd.api.types.is_bool_dtype(self._df[col])]
         return categorical_cols
 
@@ -102,7 +97,6 @@ class InteractiveDataAnalyzer:
 
     def show_missing_values(self):
         """Returns a DataFrame showing the count of missing values per column."""
-        
         missing_counts = self._df.isnull().sum()
         missing_percentage = (self._df.isnull().sum() / len(self._df)) * 100
         missing_df = pd.DataFrame({
@@ -125,128 +119,45 @@ class InteractiveDataAnalyzer:
             return negative_rows, f"{len(negative_rows)} ردیف با مقدار منفی در ستون '{column}' یافت شد."
 
 
-    def filter_data(self, column, filter_params):
-        """
-        Filters the DataFrame based on the specified column and parameters.
+    # --- Plotting Methods (Simplified) ---
 
-        filter_params structure depends on column type:
-        - Numeric: {'min': value, 'max': value} (min/max can be None)
-        - Categorical/Object/Bool: {'values': [value1, value2, ...]} or {'value': value}
-        - Datetime: {'start': datetime, 'end': datetime} (start/end can be None)
-        """
-        if column not in self._df.columns:
-            return pd.DataFrame(), "ستون برای فیلتر کردن یافت نشد."
-
-        filtered_df = self._df.copy() # Start with a copy
-
-        try:
-            if pd.api.types.is_numeric_dtype(filtered_df[column]):
-                min_val = filter_params.get('min')
-                max_val = filter_params.get('max')
-                # Apply range filter, handling potential NaNs in the column
-                if min_val is not None:
-                    filtered_df = filtered_df[filtered_df[column] >= min_val]
-                if max_val is not None:
-                    filtered_df = filtered_df[filtered_df[column] <= max_val]
-                # Keep rows where the value is NaN if min/max are None, otherwise they are filtered out by comparison
-
-            elif pd.api.types.is_object_dtype(filtered_df[column]) or pd.api.types.is_categorical_dtype(filtered_df[column]) or pd.api.types.is_bool_dtype(filtered_df[column]):
-                 values = filter_params.get('values')
-                 value = filter_params.get('value') # Allow single value as well
-
-                 if values is not None and isinstance(values, list) and values:
-                      # Filter for multiple exact values
-                      filtered_df = filtered_df[filtered_df[column].isin(values)]
-                 elif value is not None:
-                      # Filter for a single exact value (handle NaN equality explicitly if needed, default is False)
-                       if pd.isna(value):
-                            filtered_df = filtered_df[filtered_df[column].isna()]
-                       else:
-                            filtered_df = filtered_df[filtered_df[column] == value]
-                 else:
-                      return self._df.head(0), "مقدار(های) فیلتر برای ستون دسته‌ای مشخص نشده است."
-
-
-            elif pd.api.types.is_datetime64_any_dtype(filtered_df[column]):
-                start_date = filter_params.get('start')
-                end_date = filter_params.get('end')
-                # Apply date range filter
-                if start_date is not None:
-                     # Convert start_date (from date_input) to datetime and handle potential NaTs
-                    filtered_df = filtered_df[filtered_df[column] >= pd.to_datetime(start_date)]
-                if end_date is not None:
-                     # Convert end_date (from date_input) to datetime, often inclusive end of day is desired
-                     # Add a day and subtract a tiny amount to include the end date
-                     end_date_inclusive = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
-                     filtered_df = filtered_df[filtered_df[column] <= end_date_inclusive]
-
-            else:
-                 return self._df.head(0), "نوع داده ستون پشتیبانی نمی‌شود یا پارامترهای فیلتر نامعتبر هستند."
-
-            return filtered_df, f"{len(filtered_df)} ردیف پس از اعمال فیلتر یافت شد."
-
-        except Exception as e:
-            return self._df.head(0), f"خطا در اعمال فیلتر: {e}"
-
-
-    # --- Plotting Methods ---
-
-    def plot_histogram(self, column, group_by_col=None):
-        """Generates a histogram for a numeric column, optionally colored by a categorical column."""
+    def plot_histogram(self, column):
+        """Generates a histogram for a numeric column."""
         if column not in self._df.columns or column not in self.get_numeric_columns():
             return None, "ستون یافت نشد یا عددی نیست."
-        if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
-
         try:
-            fig = px.histogram(self._df, x=column, color=group_by_col,
-                               title=f'توزیع {column}' + (f' بر اساس {group_by_col}' if group_by_col else ''))
-            # Use facet_col if preferred for separate plots per group
-            # fig = px.histogram(self._df, x=column, facet_col=group_by_col, title=f'توزیع {column} بر اساس {group_by_col}')
+            fig = px.histogram(self._df, x=column, title=f'توزیع {column}')
             return fig, None
         except Exception as e:
-            return None, f"خطا در رسم هیستوگرام: {e}"
+             return None, f"خطا در رسم هیستوگرام: {e}"
 
 
-    def plot_boxplot(self, column, group_by_col=None):
-        """Generates a boxplot for a numeric column, optionally colored by a categorical column."""
+    def plot_boxplot(self, column):
+        """Generates a boxplot for a numeric column."""
         if column not in self._df.columns or column not in self.get_numeric_columns():
             return None, "ستون یافت نشد یا عددی نیست."
-        if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
         try:
-            fig = px.box(self._df, y=column, color=group_by_col,
-                         title=f'باکس‌پلات {column}' + (f' بر اساس {group_by_col}' if group_by_col else ''))
-            # Use x=group_by_col, y=column for side-by-side boxplots
-            # fig = px.box(self._df, x=group_by_col, y=column, title=f'باکس‌پلات {column} بر اساس {group_by_col}')
+            fig = px.box(self._df, y=column, title=f'باکس‌پلات {column}')
             return fig, None
         except Exception as e:
-            return None, f"خطا در رسم باکس‌پلات: {e}"
+             return None, f"خطا در رسم باکس‌پلات: {e}"
 
-
-    def plot_violin(self, column, group_by_col=None):
-        """Generates a violin plot for a numeric column, optionally colored by a categorical column."""
+    def plot_violin(self, column):
+        """Generates a violin plot for a numeric column."""
         if column not in self._df.columns or column not in self.get_numeric_columns():
             return None, "ستون یافت نشد یا عددی نیست."
-        if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
         try:
-            fig = px.violin(self._df, y=column, color=group_by_col,
-                            title=f'ویولن‌پلات {column}' + (f' بر اساس {group_by_col}' if group_by_col else ''))
-             # Use x=group_by_col, y=column for side-by-side violin plots
-            # fig = px.violin(self._df, x=group_by_col, y=column, title=f'ویولن‌پلات {column} بر اساس {group_by_col}')
+            fig = px.violin(self._df, y=column, title=f'ویولن‌پلات {column}')
             return fig, None
         except Exception as e:
-            return None, f"خطا در رسم ویولن‌پلات: {e}"
+             return None, f"خطا در رسم ویولن‌پلات: {e}"
 
 
     def plot_scatterplot(self, x_col, y_col, color_col=None):
         """Generates a scatter plot between two columns, optionally colored by a third column."""
         if x_col not in self._df.columns or y_col not in self._df.columns:
              return None, "ستون‌های X یا Y یافت نشدند."
-        if color_col and color_col not in self._df.columns:
-             return None, f"ستون رنگ‌بندی '{color_col}' یافت نشد."
-
+        # Removed check for color_col existence to allow user to select any column for color
         try:
             fig = px.scatter(self._df, x=x_col, y=y_col, color=color_col,
                              title=f'نمودار پراکندگی: {y_col} در مقابل {x_col}' + (f' بر اساس {color_col}' if color_col else ''))
@@ -255,16 +166,14 @@ class InteractiveDataAnalyzer:
             return None, f"خطا در رسم نمودار پراکندگی: {e}"
 
 
-    def plot_pairplot(self, columns=None, color_col=None):
+    def plot_pairplot(self, columns=None): # Removed color_col
         """
         Generates a pair plot (scatter matrix) for multiple numeric columns.
-        Optionally colors points by a categorical column.
         """
         numeric_cols_all = self.get_numeric_columns()
         if columns is None:
-            # Limit columns for performance on large datasets/many columns
+            # Limit columns for performance
             if len(numeric_cols_all) > 10:
-                # st.warning moved to app.py
                 numeric_cols_to_plot = numeric_cols_all[:10]
             else:
                  numeric_cols_to_plot = numeric_cols_all
@@ -273,32 +182,24 @@ class InteractiveDataAnalyzer:
             if not numeric_cols_to_plot:
                  return None, "هیچ ستون عددی معتبری برای رسم Pair Plot انتخاب نشد."
             # Ensure selected columns are actually in the dataframe
-            # st.warning moved to app.py
 
 
         if len(numeric_cols_to_plot) < 2:
             return None, "برای رسم Pair Plot حداقل به دو ستون عددی نیاز است."
 
-        # Check if color_col exists if specified
-        if color_col and color_col not in self._df.columns:
-             # st.warning moved to app.py
-             color_col = None # Reset color_col if invalid
-
         try:
-             # Use scatter_matrix which is suitable for pair plots
              fig = px.scatter_matrix(self._df,
                                       dimensions=numeric_cols_to_plot,
-                                      color=color_col,
                                       title='ماتریس پراکندگی (Pair Plot)')
-             fig.update_layout(diagonal_visible=False) # Hide density plots on diagonal if preferred
+             fig.update_layout(diagonal_visible=False)
              return fig, None
         except Exception as e:
              return None, f"خطا در رسم Pair Plot: {e}"
 
 
-    def plot_average_monthly_trend(self, time_col, metric_col, group_by_col=None):
+    def plot_average_monthly_trend(self, time_col, metric_col): # Removed group_by_col
         """
-        Plots the average of a metric over a time column, optionally grouped by another column.
+        Plots the average of a metric over a time column.
         Intended for data in long format like long_usage*.csv with 'month' column.
         """
         if time_col not in self._df.columns or metric_col not in self._df.columns:
@@ -310,13 +211,7 @@ class InteractiveDataAnalyzer:
         if metric_col not in self.get_numeric_columns():
              return None, "ستون معیار باید عددی باشد."
 
-        if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
-
         group_cols = [time_col]
-        if group_by_col:
-             group_cols.append(group_by_col)
-
         df_agg = self._df.groupby(group_cols)[metric_col].mean().reset_index()
 
         # Sort explicitly by time_col, coercing errors for robustness
@@ -328,16 +223,16 @@ class InteractiveDataAnalyzer:
              df_agg = df_agg.sort_values(by=time_col) # Fallback to string sort
 
         try:
-            fig = px.line(df_agg, x=time_col, y=metric_col, color=group_by_col,
-                          title=f'روند میانگین {metric_col} در طول زمان ({time_col})' + (f' بر اساس {group_by_col}' if group_by_col else ''))
+            fig = px.line(df_agg, x=time_col, y=metric_col,
+                          title=f'روند میانگین {metric_col} در طول زمان ({time_col})')
             return fig, None
         except Exception as e:
             return None, f"خطا در رسم روند ماهانه: {e}"
 
 
-    def plot_data_availability_trend(self, time_col='month', availability_col='Percentage of Available Data Points', group_by_col=None):
+    def plot_data_availability_trend(self, time_col='month', availability_col='Percentage of Available Data Points'): # Removed group_by_col
          """
-         Plots the trend of average data availability percentage over time, optionally grouped.
+         Plots the trend of average data availability percentage over time.
          Assumes the existence of 'month' and 'Percentage of Available Data Points' columns.
          Suitable for long_usage*.csv data.
          """
@@ -345,13 +240,8 @@ class InteractiveDataAnalyzer:
               return None, f"ستون‌های '{time_col}' یا '{availability_col}' یافت نشدند. این نمودار برای داده‌های ماهانه پردازش شده مناسب است."
          if availability_col not in self.get_numeric_columns():
               return None, f"ستون '{availability_col}' عددی نیست."
-         if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
 
          group_cols = [time_col]
-         if group_by_col:
-             group_cols.append(group_by_col)
-
          df_agg = self._df.groupby(group_cols)[availability_col].mean().reset_index()
          # Sort explicitly by time_col, coercing errors for robustness
          try:
@@ -361,17 +251,18 @@ class InteractiveDataAnalyzer:
              # st.warning moved to app.py
              df_agg = df_agg.sort_values(by=time_col) # Fallback
 
+
          try:
-            fig = px.line(df_agg, x=time_col, y=availability_col, color=group_by_col,
-                          title='روند میانگین درصد اطلاعات موجود در طول زمان' + (f' بر اساس {group_by_col}' if group_by_col else ''))
+            fig = px.line(df_agg, x=time_col, y=availability_col,
+                          title='روند میانگین درصد اطلاعات موجود در طول زمان')
             return fig, None
          except Exception as e:
              return None, f"خطا در رسم روند درصد موجودیت داده: {e}"
 
 
-    def plot_consumption_vs_operating_hours(self, consumption_col='Consumption (m³)', hours_col='Operating Hours (h)', group_by_col=None):
+    def plot_consumption_vs_operating_hours(self, consumption_col='Consumption (m³)', hours_col='Operating Hours (h)'): # Removed group_by_col
          """
-         Plots Consumption vs Operating Hours, highlighting the potential negative correlation issue, optionally grouped.
+         Plots Consumption vs Operating Hours, highlighting the potential negative correlation issue.
          Assumes the existence of 'Consumption (m³)' and 'Operating Hours (h)' columns.
          Suitable for long_usage*.csv data.
          """
@@ -379,22 +270,19 @@ class InteractiveDataAnalyzer:
               return None, f"ستون‌های '{consumption_col}' یا '{hours_col}' یافت نشدند. این نمودار برای داده‌های ماهانه پردازش شده مناسب است."
          if consumption_col not in self.get_numeric_columns() or hours_col not in self.get_numeric_columns():
               return None, "ستون‌های مصرف و ساعت کارکرد باید عددی باشند."
-         if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
-
 
          # Optional: Remove rows where both are NaN for cleaner plot
          df_plot = self._df.dropna(subset=[consumption_col, hours_col]).copy()
 
          try:
-             fig = px.scatter(df_plot, x=hours_col, y=consumption_col, color=group_by_col,
-                              title=f'نمودار پراکندگی: {consumption_col} در مقابل {hours_col}' + (f' بر اساس {group_by_col}' if group_by_col else ''))
+             fig = px.scatter(df_plot, x=hours_col, y=consumption_col,
+                              title=f'نمودار پراکندگی: {consumption_col} در مقابل {hours_col}')
              return fig, None
          except Exception as e:
              return None, f"خطا در رسم نمودار پراکندگی مصرف-ساعت کارکرد: {e}"
 
 
-    # --- Outlier Identification Methods (Keeping them as in the previous update) ---
+    # --- Outlier Identification Methods (Kept from last version) ---
 
     def identify_outliers_zscore(self, column, threshold=3):
         """
@@ -408,7 +296,6 @@ class InteractiveDataAnalyzer:
         if df_clean.empty:
              return pd.DataFrame(), pd.Series(dtype=bool), "ستون حاوی داده‌ای برای تشخیص موارد پرت نیست."
 
-        # Calculate Z-scores
         col_data = df_clean[column]
         if col_data.std() == 0 or len(col_data) < 2:
              return pd.DataFrame(), pd.Series(dtype=bool), "واریانس ستون صفر است یا تعداد نقاط داده کمتر از 2 است، نمی‌توان Z-score را محاسبه کرد."
@@ -416,10 +303,10 @@ class InteractiveDataAnalyzer:
         z_scores = np.abs(zscore(col_data))
         outlier_indices = df_clean.index[z_scores > threshold]
 
-        # Create a boolean series aligned with the original DataFrame index
         is_outlier_series = self._df.index.isin(outlier_indices)
 
-        return self._df.loc[outlier_indices], is_outlier_series, None # Return outliers df, boolean series, message
+        return self._df.loc[outlier_indices], is_outlier_series, None
+
 
     def identify_outliers_iqr(self, column, factor=1.5):
         """
@@ -429,7 +316,7 @@ class InteractiveDataAnalyzer:
         if column not in self._df.columns or column not in self.get_numeric_columns():
             return pd.DataFrame(), pd.Series(dtype=bool), "ستون یافت نشد یا عددی نیست."
 
-        df_clean = self._df.dropna(subset=[column]) # Remove NaNs for IQR calculation
+        df_clean = self._df.dropna(subset=[column])
         if df_clean.empty:
              return pd.DataFrame(), pd.Series(dtype=bool), "ستون حاوی داده‌ای برای تشخیص موارد پرت نیست."
 
@@ -443,69 +330,50 @@ class InteractiveDataAnalyzer:
         lower_bound = Q1 - factor * IQR
         upper_bound = Q3 + factor * IQR
 
-        outliers = df_clean[(df_clean[column] < lower_bound) | (df_clean[column] > upper_bound)].copy() # Use .copy()
+        outliers = df_clean[(df_clean[column] < lower_bound) | (df_clean[column] > upper_bound)].copy()
 
-        # Create a boolean series aligned with the original DataFrame index
         is_outlier_series = self._df.index.isin(outliers.index)
 
-        return outliers, is_outlier_series, None # Return outliers df, boolean series, message
+        return outliers, is_outlier_series, None
 
-    def plot_outliers_scatter(self, column, is_outlier_series, group_by_col=None):
+
+    def plot_outliers_scatter(self, column, is_outlier_series): # Removed group_by_col
          """
          Generates a scatter plot for a column, coloring points based on whether they are outliers.
-         Optionally uses a group_by_col for faceting or additional coloring (Plotly Express handles color param).
          """
          if column not in self._df.columns or column not in self.get_numeric_columns():
              return None, "ستون اصلی برای رسم موارد پرت یافت نشد یا عددی نیست."
          if not isinstance(is_outlier_series, pd.Series) or not is_outlier_series.index.equals(self._df.index):
               return None, "سری بولین موارد پرت نامعتبر است. لطفاً ابتدا تشخیص موارد پرت را اجرا کنید."
-         if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
-
 
          df_plot = self._df.copy()
-         # Add the outlier status to the DataFrame for plotting
-         df_plot['وضعیت مورد پرت'] = is_outlier_series.map({True: 'مورد پرت شناسایی شده', False: 'داده عادی'})
+         df_plot['وضعیت مورد پرت'] = is_outlier_series.map({True: 'مورد پرت شناسایی شده', False: 'داده عادی'}).fillna('نامشخص (NaN)') # Handle NaNs in original data
 
-         # Add group_by_col as color, potentially? Or facet? Let's use color for simplicity
-         color_param = 'وضعیت مورد پرت'
-         if group_by_col:
-              # If group_by_col is also provided, maybe facet or use it as a secondary color?
-              # Using color for outlier status is primary here. Can use group_by_col for facet_col if needed.
-              # Let's add group_by_col to hover_data for context.
-              hover_data_list = [column, 'وضعیت مورد پرت']
-              if group_by_col:
-                  hover_data_list.append(group_by_col)
-
-              # Alternative: Use group_by_col as color and outlier status as symbol or separate trace?
-              # For clarity, coloring by outlier status is usually best for this specific plot.
-              # Option 1: Color by outlier status, facet by group
-              # fig = px.scatter(df_plot, x=df_plot.index, y=column, color='وضعیت مورد پرت', facet_col=group_by_col,
-              #                  title=f'نمودار موارد پرت در {column}' + (f' بر اساس {group_by_col}' if group_by_col else ''),
-              #                  hover_data=hover_data_list)
-              # Option 2: Color by outlier status, use group_by_col for hover info
-              fig = px.scatter(df_plot, x=df_plot.index, y=column, color='وضعیت مورد پرت',
-                               title=f'نمودار موارد پرت در {column}' + (f' بر اساس {group_by_col}' if group_by_col else ''),
-                               hover_data=hover_data_list)
-
-         else:
+         try:
              fig = px.scatter(df_plot, x=df_plot.index, y=column, color='وضعیت مورد پرت',
                               title=f'نمودار موارد پرت در {column}',
                               hover_data=[column, 'وضعیت مورد پرت'])
 
-         # Customizing colors for clarity
-         color_map = {'مورد پرت شناسایی شده': 'red', 'داده عادی': 'blue'}
-         fig.update_traces(marker=dict(size=5)) # Adjust marker size
-         fig.update_layout(colorway=[color_map[c] for c in df_plot['وضعیت مورد پرت'].unique()]) # Apply color map
+             # Customizing colors for clarity (ensure colors are defined for all unique statuses)
+             unique_statuses = df_plot['وضعیت مورد پرت'].unique()
+             color_map = {}
+             if 'مورد پرت شناسایی شده' in unique_statuses: color_map['مورد پرت شناسایی شده'] = 'red'
+             if 'داده عادی' in unique_statuses: color_map['داده عادی'] = 'blue'
+             if 'نامشخص (NaN)' in unique_statuses: color_map['نامشخص (NaN)'] = 'gray' # Color for NaN points
 
-         return fig, None
+             fig.update_traces(marker=dict(size=6, opacity=0.8)) # Adjust marker size and transparency
+             # Ensure colors are mapped correctly
+             fig.update_layout(colorway=[color_map[s] for s in sorted(color_map.keys())]) # Use sorted keys for consistent order
+
+             return fig, None
+         except Exception as e:
+             return None, f"خطا در رسم نمودار پراکندگی موارد پرت: {e}"
 
 
-    def plot_barchart_agg(self, category_col, numeric_col, group_by_col=None):
+    def plot_barchart_agg(self, category_col, numeric_col): # Removed group_by_col
         """
         Generates a bar chart showing the mean of a numeric column
-        grouped by a categorical column, optionally colored/grouped by another categorical column.
-        If numeric_col is None, shows counts.
+        grouped by a categorical column. If numeric_col is None, shows counts.
         """
         if category_col not in self._df.columns:
             return None, "ستون دسته‌ای یافت نشد."
@@ -514,52 +382,37 @@ class InteractiveDataAnalyzer:
              return None, "ستون عددی یافت نشد."
         if numeric_col and numeric_col not in self.get_numeric_columns():
              return None, "ستون عددی، از نوع عددی نیست."
-        if group_by_col and group_by_col not in self._df.columns:
-             return None, f"ستون دسته‌بندی '{group_by_col}' یافت نشد."
 
-
-        if numeric_col:
-             # Plotly Express automatically aggregates (mean by default) when x is categorical and y is numeric
-             # Use group_by_col for color or facet_col
-             fig = px.bar(self._df, x=category_col, y=numeric_col, color=group_by_col, barmode='group', # Or 'stack'
-                          title=f'میانگین {numeric_col} بر اساس {category_col}' + (f' و {group_by_col}' if group_by_col else ''))
-        else:
-             if group_by_col:
-                 # Plot counts by two categorical columns
-                 df_counts = self._df.groupby([category_col, group_by_col]).size().reset_index(name='تعداد')
-                 fig = px.bar(df_counts, x=category_col, y='تعداد', color=group_by_col, barmode='group',
-                              title=f'تعداد ردیف‌ها بر اساس {category_col} و {group_by_col}')
-             else:
+        try:
+            if numeric_col:
+                 fig = px.bar(self._df, x=category_col, y=numeric_col,
+                              title=f'میانگین {numeric_col} بر اساس {category_col}')
+            else:
                  # Plot value counts for a single categorical column
-                 # Ensure category_col is string for value_counts robustness
                  temp_series = self._df[category_col].astype(str).value_counts().reset_index()
                  temp_series.columns = [category_col, 'تعداد']
                  fig = px.bar(temp_series, x=category_col, y='تعداد',
                               title=f'تعداد ردیف‌ها بر اساس {category_col}')
 
-        return fig, None
+            return fig, None
+        except Exception as e:
+             return None, f"خطا در رسم نمودار میله‌ای: {e}"
 
 
     def plot_correlation_heatmap(self):
         """Generates a correlation heatmap for numeric columns."""
-        numeric_df = self._df[self.get_numeric_columns()].copy() # Use a copy
+        numeric_df = self._df[self.get_numeric_columns()].copy()
 
         if numeric_df.empty:
             return None, "هیچ ستون عددی برای رسم نقشه حرارتی همبستگی وجود ندارد."
 
-        # Drop columns with zero variance as correlation is undefined
-        # Handle potential NaN values in variance calculation
         numeric_df = numeric_df.loc[:, numeric_df.var().fillna(0) != 0]
         if numeric_df.empty or numeric_df.shape[1] < 2:
              return None, "پس از حذف ستون‌های با واریانس صفر یا فقط یک مقدار، هیچ ستون عددی کافی برای رسم نقشه حرارتی باقی نماند."
 
-
         try:
-            # Calculate correlation matrix, drop rows/cols with NaNs if any non-numeric values slipped through or all values are identical
             corr_matrix = numeric_df.corr()
-            # Handle cases where correlation is NaN (e.g., due to missing values or constant columns)
-            # For display, replace NaN with 0 or handle them visually
-            corr_matrix = corr_matrix.fillna(0) # Replace NaN correlations with 0 for heatmap
+            corr_matrix = corr_matrix.fillna(0)
 
             fig = ff.create_annotated_heatmap(z=corr_matrix.values,
                                               x=list(corr_matrix.columns),
@@ -570,9 +423,9 @@ class InteractiveDataAnalyzer:
             fig.update_layout(title='نقشه حرارتی همبستگی',
                               xaxis_showgrid=False,
                               yaxis_showgrid=False,
-                              yaxis_autorange='reversed', # Make Y axis match order of index
-                              height=max(400, len(corr_matrix.index) * 40), # Adjust height based on number of columns
-                              width=max(600, len(corr_matrix.columns) * 50) # Adjust width
+                              yaxis_autorange='reversed',
+                              height=max(400, len(corr_matrix.index) * 40),
+                              width=max(600, len(corr_matrix.columns) * 50)
                               )
             return fig, None
         except Exception as e:
@@ -584,9 +437,8 @@ class InteractiveDataAnalyzer:
         if column not in self._df.columns or column not in self.get_numeric_columns():
             return pd.DataFrame(), "ستون یافت نشد یا عددی نیست."
 
-        # Work on a temporary copy of the relevant data including NaNs
         temp_df = self._df[[column]].copy()
-        data_to_scale = temp_df[[column]].dropna() # Use [[column]] to keep it a DataFrame for scalers
+        data_to_scale = temp_df[[column]].dropna()
 
         if data_to_scale.empty:
             return pd.DataFrame(), "ستون حاوی داده‌ای برای مقیاس‌بندی نیست."
@@ -602,9 +454,8 @@ class InteractiveDataAnalyzer:
 
         try:
             scaled_data = scaler.fit_transform(data_to_scale)
-            # Put the scaled data back into the temporary DataFrame, aligning by index
             temp_df.loc[data_to_scale.index, f'{column}_scaled_{method}'] = scaled_data.flatten()
 
-            return temp_df, None # Return the dataframe slice with original and scaled
+            return temp_df, None
         except Exception as e:
             return pd.DataFrame(), f"خطا در اعمال مقیاس‌بندی: {e}"
